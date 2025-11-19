@@ -24,6 +24,11 @@ export default function HomePage() {
   const [latestSlug, setLatestSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [ceremonyTime, setCeremonyTime] = useState('4:30 PM');
+  const [firstLook, setFirstLook] = useState(true);
+  const [groupPhotoCount, setGroupPhotoCount] = useState(10);
+  const [travelMinutes, setTravelMinutes] = useState(0);
+
   // Load projects on mount
   useEffect(() => {
     const fetchProjects = async () => {
@@ -51,10 +56,10 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: projectId,
-          ceremony_time: '4:30 PM',
-          first_look: true,
-          group_photo_count: 10,
-          travel_minutes_between_locations: 0,
+          ceremony_time: ceremonyTime,
+          first_look: firstLook,
+          group_photo_count: groupPhotoCount,
+          travel_minutes_between_locations: travelMinutes,
         }),
       });
 
@@ -83,6 +88,57 @@ export default function HomePage() {
             {error}
           </div>
         )}
+        
+        <section className="border rounded-lg p-4 space-y-3 bg-slate-50">
+          <h2 className="text-sm font-semibold text-slate-800">
+            Timeline settings
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <label className="flex flex-col gap-1">
+              <span className="text-slate-600">Ceremony time</span>
+              <input
+                className="border rounded-md px-2 py-1 text-sm"
+                value={ceremonyTime}
+                onChange={(e) => setCeremonyTime(e.target.value)}
+                placeholder="4:30 PM"
+              />
+            </label>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={firstLook}
+                onChange={(e) => setFirstLook(e.target.checked)}
+              />
+              <span className="text-slate-600">Include first look</span>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-slate-600">Group photo count</span>
+              <input
+                type="number"
+                className="border rounded-md px-2 py-1 text-sm"
+                value={groupPhotoCount}
+                onChange={(e) => setGroupPhotoCount(Number(e.target.value) || 0)}
+                min={0}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-slate-600">Travel minutes between locations</span>
+              <input
+                type="number"
+                className="border rounded-md px-2 py-1 text-sm"
+                value={travelMinutes}
+                onChange={(e) => setTravelMinutes(Number(e.target.value) || 0)}
+                min={0}
+              />
+            </label>
+          </div>
+          <p className="text-xs text-slate-500">
+            These settings will be used the next time you click &quot;Generate timeline&quot; for any project.
+          </p>
+        </section>
 
         <div className="border rounded-lg divide-y">
           {projects.length === 0 ? (
