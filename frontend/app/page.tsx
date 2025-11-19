@@ -118,16 +118,32 @@ export default function HomePage() {
         </div>
 
         {latestSlug && (
-          <div className="mt-4">
-            <div className="font-semibold">Generated timeline:</div>
-            <a
-              href={`${API_URL}/t/${latestSlug}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-blue-600 underline break-all"
-            >
-              {`${API_URL}/t/${latestSlug}`}
-            </a>
+          <div className="mt-4 space-y-1 text-sm">
+            <div className="font-semibold">Generated timeline links:</div>
+
+            <div>
+              <span className="text-slate-500 mr-1">Pretty view:</span>
+              <a
+                href={`/timeline/${latestSlug}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-600 underline break-all"
+              >
+                {`http://localhost:3000/timeline/${latestSlug}`}
+              </a>
+            </div>
+
+            <div>
+              <span className="text-slate-500 mr-1">Raw JSON (dev):</span>
+              <a
+                href={`${API_URL}/t/${latestSlug}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-600 underline break-all"
+              >
+                {`${API_URL}/t/${latestSlug}`}
+              </a>
+            </div>
           </div>
         )}
       </div>
