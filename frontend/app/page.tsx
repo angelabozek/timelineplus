@@ -9,6 +9,7 @@ type Project = {
   title: string;
   event_date: string | null;
   status: string;
+  timeline_slug?: string | null;
 };
 
 type GenerateResponse = {
@@ -70,6 +71,13 @@ export default function HomePage() {
 
       const data: GenerateResponse = await res.json();
       setLatestSlug(data.slug);
+
+      // Update this project’s timeline_slug in the list so the UI shows "View timeline"
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId ? { ...p, timeline_slug: data.slug } : p
+        )
+      );
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Error generating timeline');
@@ -159,15 +167,30 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleGenerate(p.id)}
-                  className="px-3 py-1.5 rounded-md border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
-                  disabled={loading && selectedProjectId === p.id}
-                >
-                  {loading && selectedProjectId === p.id
-                    ? 'Generating...'
-                    : 'Generate timeline'}
-                </button>
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    onClick={() => handleGenerate(p.id)}
+                    className="px-3 py-1.5 rounded-md border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
+                    disabled={loading && selectedProjectId === p.id}
+                  >
+                    {loading && selectedProjectId === p.id
+                      ? 'Generating...'
+                      : p.timeline_slug
+                      ? 'Regenerate'
+                      : 'Generate timeline'}
+                  </button>
+
+                  {p.timeline_slug && (
+                    <a
+                      href={`/timeline/${p.timeline_slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-blue-600 underline"
+                    >
+                      View timeline
+                    </a>
+                  )}
+                </div>
               </div>
             ))
           )}

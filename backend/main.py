@@ -89,15 +89,23 @@ async def create_project(body: ProjectIn, db: AsyncSession = Depends(get_session
 
 @app.get("/projects")
 async def list_projects(db: AsyncSession = Depends(get_session)):
-    rows = (await db.execute(select(Project))).scalars().all()
+    # LEFT JOIN projects with timelines, so we can see if a project already has a timeline
+    result = await db.execute(
+        select(Project, Timeline.public_slug)
+        .select_from(Project)
+        .join(Timeline, Timeline.project_id == Project.id, isouter=True)
+    )
+    rows = result.all()
+
     return [
         {
             "id": str(p.id),
             "title": p.title,
-            "event_date": (p.event_date.isoformat() if p.event_date else None),
+            "event_date": p.event_date.isoformat() if p.event_date else None,
             "status": p.status,
+            "timeline_slug": slug,  # may be None if no timeline yet
         }
-        for p in rows
+        for p, slug in rows
     ]
 
 @app.post("/timeline/generate")
