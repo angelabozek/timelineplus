@@ -1,12 +1,15 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from db import engine, Base, get_session
 from models import Account, Project, Timeline
 from pydantic import BaseModel
 import datetime, secrets
 from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+import json
 
 app = FastAPI()
 
@@ -46,6 +49,13 @@ class TimelineInput(BaseModel):
     first_look: bool = True
     group_photo_count: int = 10
     travel_minutes_between_locations: int = 0
+
+class TimelineItemUpdate(BaseModel):
+    time: str
+    label: str
+
+class TimelineUpdate(BaseModel):
+    items: List[TimelineItemUpdate]
 
 def parse_time_on_event(date: datetime.date, time_str: str) -> datetime.datetime:
     """Parse '4:30 PM' or '16:30' into a datetime on the given date."""
@@ -252,20 +262,21 @@ async def generate_timeline(body: TimelineInput, db: AsyncSession = Depends(get_
     }
 
 @app.get("/t/{slug}")
-async def get_public_timeline(slug: str, db: AsyncSession = Depends(get_session)):
-    print("DEBUG /t called with slug:", slug)  # TEMP DEBUG
-
-    # 1) Load the timeline row by slug
+async def get_public_timeline(
+    slug: str,
+    db: AsyncSession = Depends(get_session),
+):
+    # Load timeline + project title if available
     result = await db.execute(
-        select(Timeline).where(Timeline.public_slug == slug)
+        select(Timeline)
+        .options(selectinload(Timeline.project))  # if you have relationship
+        .where(Timeline.public_slug == slug)
     )
     tl = result.scalar_one_or_none()
-    print("DEBUG /t found timeline:", bool(tl))  # TEMP DEBUG
-
     if not tl:
         raise HTTPException(status_code=404, detail="Timeline not found")
 
-    # 2) Safely load the schedule JSON (handles dict OR string)
+    # Normalize schedule JSON
     raw_schedule = tl.schedule
     if raw_schedule is None:
         schedule_data = {}
@@ -277,24 +288,83 @@ async def get_public_timeline(slug: str, db: AsyncSession = Depends(get_session)
     else:
         schedule_data = raw_schedule
 
-    items = schedule_data.get("items", [])
+    items = schedule_data.get("items") or []
 
-    # 3) Explicitly load the related project (no lazy load)
-    proj_title = None
-    proj_date = None
+    # Title / event_date – adjust to your model
+    title = None
+    event_date = None
 
-    if tl.project_id:
-        res2 = await db.execute(
-            select(Project).where(Project.id == tl.project_id)
+    # If you have a Project relationship with title & event_date:
+    if getattr(tl, "project", None) is not None:
+        title = tl.project.title
+        event_date = (
+            tl.project.event_date.isoformat()
+            if getattr(tl.project, "event_date", None)
+            else None
         )
-        proj = res2.scalar_one_or_none()
-        print("DEBUG /t found project:", bool(proj))  # TEMP DEBUG
-        if proj:
-            proj_title = proj.title
-            proj_date = proj.event_date.isoformat() if proj.event_date else None
+
+    # Fallbacks if needed
+    if not title and hasattr(tl, "title"):
+        title = tl.title
 
     return {
-        "title": proj_title,
-        "event_date": proj_date,
+        "title": title,
+        "event_date": event_date,
         "items": items,
+    }
+
+@app.patch("/timeline/{slug}")
+async def update_timeline(
+    slug: str,
+    body: dict,
+    db: AsyncSession = Depends(get_session),
+):
+    # Get items from body
+    raw_items = body.get("items") or []
+    if not isinstance(raw_items, list):
+        raise HTTPException(status_code=400, detail="items must be a list")
+
+    # Clean up items (force {time, label} shape)
+    cleaned_items: list[dict] = []
+    for it in raw_items:
+        if not isinstance(it, dict):
+            continue
+        time = str(it.get("time", "")).strip()
+        label = str(it.get("label", "")).strip()
+        if not label:
+            continue
+        cleaned_items.append({"time": time, "label": label})
+
+    # Load existing timeline by public slug
+    result = await db.execute(
+        select(Timeline).where(Timeline.public_slug == slug)
+    )
+    tl = result.scalar_one_or_none()
+    if not tl:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    # Load existing schedule as dict
+    raw_schedule = tl.schedule
+    if raw_schedule is None:
+        schedule_data = {}
+    elif isinstance(raw_schedule, str):
+        try:
+            schedule_data = json.loads(raw_schedule)
+        except json.JSONDecodeError:
+            schedule_data = {}
+    else:
+        schedule_data = raw_schedule
+
+    # Replace items
+    schedule_data["items"] = cleaned_items
+
+    # 🔐 Always store as JSON text so it’s consistent
+    tl.schedule = json.dumps(schedule_data)
+
+    await db.commit()
+    await db.refresh(tl)
+
+    return {
+        "status": "ok",
+        "items": schedule_data["items"],
     }
