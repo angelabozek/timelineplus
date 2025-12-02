@@ -4,7 +4,9 @@ import React, { useEffect, useState } from 'react';
 
 const API_URL = 'http://localhost:8000'; // keep hardcoded for now
 
+// ✅ 1. id is now required in TimelineItem
 type TimelineItem = {
+  id: string;
   time: string;
   label: string;
 };
@@ -28,24 +30,23 @@ export default function TimelineClient({ slug }: { slug: string }) {
   useEffect(() => {
     const fetchTimeline = async () => {
       try {
-        console.log('Timeline page slug prop:', slug);
-        console.log('Fetching timeline from:', `${API_URL}/t/${slug}`);
-
-        const res = await fetch(`${API_URL}/t/${slug}`, {
-          cache: 'no-store',
-        });
-
-        console.log('Timeline response status:', res.status);
+        const res = await fetch(`${API_URL}/t/${slug}`, { cache: 'no-store' });
 
         if (!res.ok) {
           const txt = await res.text();
-          console.log('Timeline error body:', txt);
-          throw new Error('Timeline not found');
+          throw new Error(txt || 'Timeline not found');
         }
 
         const json: TimelineResponse = await res.json();
+
+        // ✅ Ensure every item has an id
+        const enrichedItems = (json.items || []).map((item) => ({
+          ...item,
+          id: item.id || crypto.randomUUID(),
+        }));
+
         setData(json);
-        setItems(json.items || []);
+        setItems(enrichedItems);
       } catch (err: any) {
         console.error(err);
         setError(err.message || 'Error loading timeline');
@@ -71,6 +72,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
     setItems((prev) => [
       ...prev,
       {
+        id: crypto.randomUUID(),
         time: '',
         label: 'New item',
       },
@@ -113,6 +115,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
 
     const payload = {
       items: items.map((it) => ({
+        id: it.id,
         time: it.time,
         label: it.label,
       })),
@@ -131,10 +134,14 @@ export default function TimelineClient({ slug }: { slug: string }) {
       }
 
       const json = await res.json();
-      if (json.items) {
-        setItems(json.items);
-      }
 
+      // ✅ Ensure response items also have ids
+      const enrichedItems = (json.items || []).map((item: TimelineItem) => ({
+        ...item,
+        id: item.id || crypto.randomUUID(),
+      }));
+
+      setItems(enrichedItems);
       setSaveMessage('Saved');
     } catch (e: any) {
       console.error(e);
@@ -232,7 +239,8 @@ export default function TimelineClient({ slug }: { slug: string }) {
           <>
             <ol className="space-y-3">
               {items.map((item, idx) => (
-                <li key={idx} className="flex gap-4 items-start">
+                // ✅ 2. Use item.id as React key
+                <li key={item.id} className="flex gap-4 items-start">
                   <div className="flex flex-col items-center">
                     <div className="w-2 h-2 rounded-full bg-slate-600 mt-2" />
                     {idx !== items.length - 1 && (
@@ -241,7 +249,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
                   </div>
                   <div className="flex-1 flex flex-col gap-1">
                     {editMode ? (
-                      <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex flex-col sm:flex-row gap-2 items-start">
                         <input
                           className="border rounded-md px-2 py-1 text-xs w-24"
                           value={item.time}
@@ -256,6 +264,14 @@ export default function TimelineClient({ slug }: { slug: string }) {
                             handleItemChange(idx, 'label', e.target.value)
                           }
                         />
+                        <button
+                          onClick={() =>
+                            setItems(items.filter((_, i) => i !== idx))
+                          }
+                          className="text-red-500 text-xs ml-2"
+                        >
+                          Delete
+                        </button>
                       </div>
                     ) : (
                       <>
