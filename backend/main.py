@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import json
+from datetime import date
 
 app = FastAPI()
 
@@ -319,8 +320,11 @@ async def update_timeline(
     body: dict,
     db: AsyncSession = Depends(get_session),
 ):
-    # Get items from body
+    # --- 1) Read incoming fields ---
     raw_items = body.get("items") or []
+    title = body.get("title")          # may be None
+    event_date_str = body.get("event_date")  # "2026-08-29" or None / ""
+
     if not isinstance(raw_items, list):
         raise HTTPException(status_code=400, detail="items must be a list")
 
@@ -335,15 +339,17 @@ async def update_timeline(
             continue
         cleaned_items.append({"time": time, "label": label})
 
-    # Load existing timeline by public slug
+    # --- 2) Load existing timeline + its project ---
     result = await db.execute(
-        select(Timeline).where(Timeline.public_slug == slug)
+        select(Timeline)
+        .where(Timeline.public_slug == slug)
+        .options(selectinload(Timeline.project))
     )
     tl = result.scalar_one_or_none()
     if not tl:
         raise HTTPException(status_code=404, detail="Timeline not found")
 
-    # Load existing schedule as dict
+    # --- 3) Load existing schedule as dict ---
     raw_schedule = tl.schedule
     if raw_schedule is None:
         schedule_data = {}
@@ -358,13 +364,41 @@ async def update_timeline(
     # Replace items
     schedule_data["items"] = cleaned_items
 
-    # 🔐 Always store as JSON text so it’s consistent
+    # --- 4) Update project title / event_date if present ---
+    if getattr(tl, "project", None):
+        if title is not None:
+            tl.project.title = title
+
+        # event_date_str could be "", None, or "YYYY-MM-DD"
+        if event_date_str:
+            try:
+                tl.project.event_date = date.fromisoformat(event_date_str)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid event_date format. Expected YYYY-MM-DD.",
+                )
+        else:
+            # If you want to allow clearing the date:
+            tl.project.event_date = None
+
+    # 🔐 Always store schedule as JSON text so it’s consistent
     tl.schedule = json.dumps(schedule_data)
 
     await db.commit()
     await db.refresh(tl)
 
+    # --- 5) Build response payload ---
+    # decode schedule again to be safe
+    schedule_out = schedule_data.get("items", [])
+
     return {
         "status": "ok",
-        "items": schedule_data["items"],
+        "title": tl.project.title if getattr(tl, "project", None) else None,
+        "event_date": (
+            tl.project.event_date.isoformat()
+            if getattr(tl, "project", None) and tl.project.event_date
+            else None
+        ),
+        "items": schedule_out,
     }

@@ -2,9 +2,22 @@
 
 import React, { useEffect, useState } from 'react';
 
+function formatISODate(iso: string | null): string {
+  if (!iso) return '';
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts.map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(y, m - 1, d); // local date, no timezone shift
+  return dt.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
 const API_URL = 'http://localhost:8000'; // keep hardcoded for now
 
-// ✅ 1. id is now required in TimelineItem
 type TimelineItem = {
   id: string;
   time: string;
@@ -26,6 +39,8 @@ export default function TimelineClient({ slug }: { slug: string }) {
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [editableTitle, setEditableTitle] = useState<string>('');
+  const [editableDate, setEditableDate] = useState<string>(''); // yyyy-mm-dd
 
   useEffect(() => {
     const fetchTimeline = async () => {
@@ -39,7 +54,6 @@ export default function TimelineClient({ slug }: { slug: string }) {
 
         const json: TimelineResponse = await res.json();
 
-        // ✅ Ensure every item has an id
         const enrichedItems = (json.items || []).map((item) => ({
           ...item,
           id: item.id || crypto.randomUUID(),
@@ -47,6 +61,10 @@ export default function TimelineClient({ slug }: { slug: string }) {
 
         setData(json);
         setItems(enrichedItems);
+
+        // init editable header fields
+        setEditableTitle(json.title ?? '');
+        setEditableDate(json.event_date ?? '');
       } catch (err: any) {
         console.error(err);
         setError(err.message || 'Error loading timeline');
@@ -82,14 +100,14 @@ export default function TimelineClient({ slug }: { slug: string }) {
   const handleCopy = async () => {
     if (!data) return;
 
-    const headerTitle = data.title || 'Wedding Timeline';
-    const headerDate = data.event_date
-      ? new Date(data.event_date).toLocaleDateString(undefined, {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })
-      : '';
+    const headerTitle = editableTitle || data.title || 'Wedding Timeline';
+
+    let headerDate = '';
+    if (editableDate) {
+      headerDate = formatISODate(editableDate);
+    } else if (data.event_date) {
+      headerDate = formatISODate(data.event_date);
+    }
 
     const lines = [
       headerTitle,
@@ -113,8 +131,15 @@ export default function TimelineClient({ slug }: { slug: string }) {
     setSaving(true);
     setSaveMessage(null);
 
+    const sortedItems = [...items].sort((a, b) =>
+      (a.time || '').localeCompare(b.time || '')
+    );
+    setItems(sortedItems);
+
     const payload = {
-      items: items.map((it) => ({
+      title: editableTitle || null,
+      event_date: editableDate || null,
+      items: sortedItems.map((it) => ({
         id: it.id,
         time: it.time,
         label: it.label,
@@ -135,13 +160,23 @@ export default function TimelineClient({ slug }: { slug: string }) {
 
       const json = await res.json();
 
-      // ✅ Ensure response items also have ids
       const enrichedItems = (json.items || []).map((item: TimelineItem) => ({
         ...item,
         id: item.id || crypto.randomUUID(),
       }));
 
       setItems(enrichedItems);
+
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              title: json.title ?? prev.title,
+              event_date: json.event_date ?? prev.event_date,
+            }
+          : prev
+      );
+
       setSaveMessage('Saved');
     } catch (e: any) {
       console.error(e);
@@ -180,17 +215,33 @@ export default function TimelineClient({ slug }: { slug: string }) {
             <p className="text-xs uppercase tracking-wide text-slate-500">
               Wedding Day Timeline
             </p>
-            <h1 className="text-2xl font-semibold">
-              {title || 'Wedding Timeline'}
-            </h1>
-            {event_date && (
-              <p className="text-sm text-slate-500">
-                {new Date(event_date).toLocaleDateString(undefined, {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                })}
-              </p>
+
+            {editMode ? (
+              <div className="space-y-2">
+                <input
+                  className="border rounded-md px-2 py-1 text-sm w-full"
+                  placeholder="Wedding title"
+                  value={editableTitle}
+                  onChange={(e) => setEditableTitle(e.target.value)}
+                />
+                <input
+                  type="date"
+                  className="border rounded-md px-2 py-1 text-sm"
+                  value={editableDate}
+                  onChange={(e) => setEditableDate(e.target.value)}
+                />
+              </div>
+            ) : (
+              <>
+                <h1 className="text-2xl font-semibold">
+                  {title || 'Wedding Timeline'}
+                </h1>
+                {event_date && (
+                  <p className="text-sm text-slate-500">
+                    {formatISODate(event_date)}
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -239,7 +290,6 @@ export default function TimelineClient({ slug }: { slug: string }) {
           <>
             <ol className="space-y-3">
               {items.map((item, idx) => (
-                // ✅ 2. Use item.id as React key
                 <li key={item.id} className="flex gap-4 items-start">
                   <div className="flex flex-col items-center">
                     <div className="w-2 h-2 rounded-full bg-slate-600 mt-2" />
