@@ -2,13 +2,29 @@
 
 import React, { useEffect, useState } from 'react';
 
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+
+import {
+  arrayMove,
+  SortableContext,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+
+import { SortableItem } from "./SortableItem"; 
+
 function formatISODate(iso: string | null): string {
   if (!iso) return '';
   const parts = iso.split('-');
   if (parts.length !== 3) return iso;
   const [y, m, d] = parts.map(Number);
   if (!y || !m || !d) return iso;
-  const dt = new Date(y, m - 1, d); // local date, no timezone shift
+  const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'long',
@@ -16,7 +32,7 @@ function formatISODate(iso: string | null): string {
   });
 }
 
-const API_URL = 'http://localhost:8000'; // keep hardcoded for now
+const API_URL = 'http://localhost:8000';
 
 type TimelineItem = {
   id: string;
@@ -40,8 +56,31 @@ export default function TimelineClient({ slug }: { slug: string }) {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [editableTitle, setEditableTitle] = useState<string>('');
-  const [editableDate, setEditableDate] = useState<string>(''); // yyyy-mm-dd
+  const [editableDate, setEditableDate] = useState<string>(''); 
 
+  // -----------------------------
+  // DND-KIT SENSORS
+  // -----------------------------
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    })
+  );
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    setItems((prev) => {
+      const oldIndex = prev.findIndex((i) => i.id === active.id);
+      const newIndex = prev.findIndex((i) => i.id === over.id);
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+  };
+
+  // -----------------------------
+  // LOAD TIMELINE
+  // -----------------------------
   useEffect(() => {
     const fetchTimeline = async () => {
       try {
@@ -62,7 +101,6 @@ export default function TimelineClient({ slug }: { slug: string }) {
         setData(json);
         setItems(enrichedItems);
 
-        // init editable header fields
         setEditableTitle(json.title ?? '');
         setEditableDate(json.event_date ?? '');
       } catch (err: any) {
@@ -76,6 +114,9 @@ export default function TimelineClient({ slug }: { slug: string }) {
     fetchTimeline();
   }, [slug]);
 
+  // -----------------------------
+  // ITEM CHANGE HANDLERS
+  // -----------------------------
   const handleItemChange = (
     index: number,
     field: keyof TimelineItem,
@@ -97,6 +138,9 @@ export default function TimelineClient({ slug }: { slug: string }) {
     ]);
   };
 
+  // -----------------------------
+  // COPY TEXT
+  // -----------------------------
   const handleCopy = async () => {
     if (!data) return;
 
@@ -127,6 +171,9 @@ export default function TimelineClient({ slug }: { slug: string }) {
     }
   };
 
+  // -----------------------------
+  // SAVE CHANGES
+  // -----------------------------
   const handleSave = async () => {
     setSaving(true);
     setSaveMessage(null);
@@ -139,7 +186,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
     const payload = {
       title: editableTitle || null,
       event_date: editableDate || null,
-      items: sortedItems.map((it) => ({
+      items: items.map((it) => ({
         id: it.id,
         time: it.time,
         label: it.label,
@@ -187,6 +234,9 @@ export default function TimelineClient({ slug }: { slug: string }) {
     }
   };
 
+  // -----------------------------
+  // RENDER UI
+  // -----------------------------
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-50 flex justify-center items-center">
@@ -205,11 +255,11 @@ export default function TimelineClient({ slug }: { slug: string }) {
     );
   }
 
-  const { title, event_date } = data;
-
   return (
     <main className="min-h-screen bg-slate-50 flex justify-center p-6">
       <div className="w-full max-w-2xl bg-white rounded-2xl shadow-md p-6 space-y-6">
+
+        {/* HEADER */}
         <header className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-wide text-slate-500">
@@ -234,11 +284,11 @@ export default function TimelineClient({ slug }: { slug: string }) {
             ) : (
               <>
                 <h1 className="text-2xl font-semibold">
-                  {title || 'Wedding Timeline'}
+                  {data.title || 'Wedding Timeline'}
                 </h1>
-                {event_date && (
+                {data.event_date && (
                   <p className="text-sm text-slate-500">
-                    {formatISODate(event_date)}
+                    {formatISODate(data.event_date)}
                   </p>
                 )}
               </>
@@ -272,6 +322,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
             >
               Copy to clipboard
             </button>
+
             {copyMessage && (
               <span className="text-[10px] text-slate-500">{copyMessage}</span>
             )}
@@ -281,6 +332,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
           </div>
         </header>
 
+        {/* TIMELINE LIST WITH DRAG & DROP */}
         {items.length === 0 ? (
           <p className="text-sm text-slate-600">
             No timeline items yet. Please ask your photographer or planner to
@@ -288,55 +340,30 @@ export default function TimelineClient({ slug }: { slug: string }) {
           </p>
         ) : (
           <>
-            <ol className="space-y-3">
-              {items.map((item, idx) => (
-                <li key={item.id} className="flex gap-4 items-start">
-                  <div className="flex flex-col items-center">
-                    <div className="w-2 h-2 rounded-full bg-slate-600 mt-2" />
-                    {idx !== items.length - 1 && (
-                      <div className="w-px flex-1 bg-slate-200 mt-1" />
-                    )}
-                  </div>
-                  <div className="flex-1 flex flex-col gap-1">
-                    {editMode ? (
-                      <div className="flex flex-col sm:flex-row gap-2 items-start">
-                        <input
-                          className="border rounded-md px-2 py-1 text-xs w-24"
-                          value={item.time}
-                          onChange={(e) =>
-                            handleItemChange(idx, 'time', e.target.value)
-                          }
-                        />
-                        <input
-                          className="border rounded-md px-2 py-1 text-xs flex-1"
-                          value={item.label}
-                          onChange={(e) =>
-                            handleItemChange(idx, 'label', e.target.value)
-                          }
-                        />
-                        <button
-                          onClick={() =>
-                            setItems(items.filter((_, i) => i !== idx))
-                          }
-                          className="text-red-500 text-xs ml-2"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="text-xs font-mono text-slate-500">
-                          {item.time}
-                        </div>
-                        <div className="text-sm font-medium text-slate-900">
-                          {item.label}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={items.map((i) => i.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <ol className="space-y-3">
+                  {items.map((item, idx) => (
+                    <SortableItem
+                      key={item.id}
+                      id={item.id}
+                      idx={idx}
+                      item={item}
+                      editMode={editMode}
+                      handleItemChange={handleItemChange}
+                      setItems={setItems}
+                    />
+                  ))}
+                </ol>
+              </SortableContext>
+            </DndContext>
 
             {editMode && (
               <div className="pt-3">
@@ -352,6 +379,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
           </>
         )}
 
+        {/* FOOTER */}
         <footer className="pt-4 border-t border-slate-100 text-xs text-slate-400 flex justify-between">
           <span>Generated by Timeline+</span>
           <span>Adjust as needed, then copy &amp; share</span>
