@@ -329,15 +329,23 @@ async def update_timeline(
         raise HTTPException(status_code=400, detail="items must be a list")
 
     # Clean up items (force {time, label} shape)
-    cleaned_items: list[dict] = []
+    cleaned_items = []
     for it in raw_items:
         if not isinstance(it, dict):
             continue
+
+        item_id = it.get("id")
         time = str(it.get("time", "")).strip()
         label = str(it.get("label", "")).strip()
-        if not label:
+
+        if not item_id or not label:
             continue
-        cleaned_items.append({"time": time, "label": label})
+
+        cleaned_items.append({
+            "id": item_id,
+            "time": time,
+            "label": label,
+        })
 
     # --- 2) Load existing timeline + its project ---
     result = await db.execute(
@@ -394,11 +402,7 @@ async def update_timeline(
 
     return {
         "status": "ok",
-        "title": tl.project.title if getattr(tl, "project", None) else None,
-        "event_date": (
-            tl.project.event_date.isoformat()
-            if getattr(tl, "project", None) and tl.project.event_date
-            else None
-        ),
-        "items": schedule_out,
-    }
+        "title": tl.project.title if tl.project else None,
+        "event_date": tl.project.event_date.isoformat() if tl.project and tl.project.event_date else None,
+        "items": schedule_data["items"],
+}
