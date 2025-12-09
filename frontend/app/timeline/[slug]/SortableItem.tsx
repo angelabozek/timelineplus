@@ -3,14 +3,23 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+type Props = {
+  id: string;
+  idx: number;
+  item: { id: string; time: string; label: string };
+  editMode: boolean;
+  handleItemChange: (index: number, field: "time" | "label", value: string) => void;
+  handleDelete: (item: any, index: number) => void;
+};
+
 export function SortableItem({
   id,
   idx,
   item,
   editMode,
   handleItemChange,
-  setItems,
-}: any) {
+  handleDelete,
+}: Props) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id });
 
@@ -20,61 +29,41 @@ export function SortableItem({
   };
 
   return (
-    <li ref={setNodeRef} style={style} className="flex gap-4 items-start">
-      {/* Drag Handle */}
+    <li ref={setNodeRef} style={style} className="flex gap-3 items-start">
       {editMode && (
         <button
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing text-slate-400 mr-2"
+          className="cursor-grab text-slate-400 text-lg pt-1"
         >
           ⋮⋮
         </button>
       )}
 
-      {/* Timeline visual connector */}
-      <div className="flex flex-col items-center">
-        <div className="w-2 h-2 rounded-full bg-slate-600 mt-2" />
-        {idx !== undefined && idx !== null && (
-          <div className="w-px flex-1 bg-slate-200 mt-1" />
-        )}
-      </div>
-
-      {/* Item content */}
-      <div className="flex-1 flex flex-col gap-1">
+      <div className="flex-1">
         {editMode ? (
-          <div className="flex flex-col sm:flex-row gap-2 items-start">
+          <div className="flex gap-2">
             <input
-              className="border rounded-md px-2 py-1 text-xs w-24"
+              className="border rounded-md px-2 py-1 text-xs w-20"
               value={item.time}
-              onChange={(e) =>
-                handleItemChange(idx, "time", e.target.value)
-              }
+              onChange={(e) => handleItemChange(idx, "time", e.target.value)}
             />
             <input
               className="border rounded-md px-2 py-1 text-xs flex-1"
               value={item.label}
-              onChange={(e) =>
-                handleItemChange(idx, "label", e.target.value)
-              }
+              onChange={(e) => handleItemChange(idx, "label", e.target.value)}
             />
             <button
-              onClick={() =>
-                setItems((prev: any) => prev.filter((_, i) => i !== idx))
-              }
-              className="text-red-500 text-xs ml-2"
+              onClick={() => handleDelete(item, idx)}
+              className="text-red-500 text-xs"
             >
               Delete
             </button>
           </div>
         ) : (
           <>
-            <div className="text-xs font-mono text-slate-500">
-              {item.time}
-            </div>
-            <div className="text-sm font-medium text-slate-900">
-              {item.label}
-            </div>
+            <div className="text-xs font-mono text-slate-500">{item.time}</div>
+            <div className="text-sm font-medium text-slate-900">{item.label}</div>
           </>
         )}
       </div>

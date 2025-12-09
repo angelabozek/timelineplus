@@ -8,29 +8,15 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-} from "@dnd-kit/core";
+} from '@dnd-kit/core';
 
 import {
   arrayMove,
   SortableContext,
   verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+} from '@dnd-kit/sortable';
 
-import { SortableItem } from "./SortableItem"; 
-
-function formatISODate(iso: string | null): string {
-  if (!iso) return '';
-  const parts = iso.split('-');
-  if (parts.length !== 3) return iso;
-  const [y, m, d] = parts.map(Number);
-  if (!y || !m || !d) return iso;
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
+import { SortableItem } from './SortableItem';
 
 const API_URL = 'http://localhost:8000';
 
@@ -46,21 +32,77 @@ type TimelineResponse = {
   items: TimelineItem[];
 };
 
+// ---------- Helpers ----------
+
+function formatISODate(iso: string | null): string {
+  if (!iso) return '';
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts.map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+/** Normalize any raw items into TimelineItem with guaranteed unique id */
+function ensureItemsHaveIds(raw: any[] | null | undefined): TimelineItem[] {
+  if (!raw) return [];
+  return raw.map((it: any) => ({
+    id:
+      typeof it.id === 'string' && it.id
+        ? it.id
+        : crypto.randomUUID(),
+    time:
+      typeof it.time === 'string'
+        ? it.time
+        : (it.time ?? '').toString(),
+    label:
+      typeof it.label === 'string'
+        ? it.label
+        : (it.label ?? '').toString(),
+  }));
+}
+
+// ---------- Component ----------
+
 export default function TimelineClient({ slug }: { slug: string }) {
   const [data, setData] = useState<TimelineResponse | null>(null);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const [editMode, setEditMode] = useState(false);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [editableTitle, setEditableTitle] = useState<string>('');
-  const [editableDate, setEditableDate] = useState<string>(''); 
+  const [editableDate, setEditableDate] = useState<string>(''); // yyyy-mm-dd
 
-  // -----------------------------
-  // DND-KIT SENSORS
-  // -----------------------------
+  // DELETE + UNDO
+  const [lastDeleted, setLastDeleted] = useState<TimelineItem | null>(null);
+  const [undoTimer, setUndoTimer] = useState<number | null>(null);
+  const UNDO_DURATION = 4000;
+
+  const handleDelete = (item: TimelineItem, index: number) => {
+    setLastDeleted(item);
+    setItems((prev) => prev.filter((_, i) => i !== index));
+
+    if (undoTimer) {
+      clearTimeout(undoTimer);
+    }
+
+    const t = window.setTimeout(() => {
+      setLastDeleted(null);
+    }, UNDO_DURATION);
+
+    setUndoTimer(t);
+  };
+
+  // DND sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
@@ -74,13 +116,12 @@ export default function TimelineClient({ slug }: { slug: string }) {
     setItems((prev) => {
       const oldIndex = prev.findIndex((i) => i.id === active.id);
       const newIndex = prev.findIndex((i) => i.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
       return arrayMove(prev, oldIndex, newIndex);
     });
   };
 
-  // -----------------------------
-  // LOAD TIMELINE
-  // -----------------------------
+  // LOAD TIMELINE + RESTORE DRAFT
   useEffect(() => {
     const fetchTimeline = async () => {
       try {
@@ -93,16 +134,30 @@ export default function TimelineClient({ slug }: { slug: string }) {
 
         const json: TimelineResponse = await res.json();
 
-        const enrichedItems = (json.items || []).map((item) => ({
-          ...item,
-          id: item.id || crypto.randomUUID(),
-        }));
-
+        const serverItems = ensureItemsHaveIds(json.items || []);
         setData(json);
-        setItems(enrichedItems);
-
+        setItems(serverItems);
         setEditableTitle(json.title ?? '');
         setEditableDate(json.event_date ?? '');
+
+        // restore draft if exists
+        const draftStr = localStorage.getItem(`timeline_draft_${slug}`);
+        if (draftStr) {
+          try {
+            const draft = JSON.parse(draftStr);
+            if (draft.items) {
+              setItems(ensureItemsHaveIds(draft.items));
+            }
+            if (typeof draft.title === 'string') {
+              setEditableTitle(draft.title);
+            }
+            if (typeof draft.event_date === 'string') {
+              setEditableDate(draft.event_date);
+            }
+          } catch {
+            // ignore bad draft
+          }
+        }
       } catch (err: any) {
         console.error(err);
         setError(err.message || 'Error loading timeline');
@@ -114,9 +169,18 @@ export default function TimelineClient({ slug }: { slug: string }) {
     fetchTimeline();
   }, [slug]);
 
-  // -----------------------------
-  // ITEM CHANGE HANDLERS
-  // -----------------------------
+  // AUTOSAVE to localStorage while editing
+  useEffect(() => {
+    if (!editMode) return;
+    const draft = {
+      items,
+      title: editableTitle,
+      event_date: editableDate,
+    };
+    localStorage.setItem(`timeline_draft_${slug}`, JSON.stringify(draft));
+  }, [items, editableTitle, editableDate, editMode, slug]);
+
+  // ITEM handlers
   const handleItemChange = (
     index: number,
     field: keyof TimelineItem,
@@ -138,9 +202,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
     ]);
   };
 
-  // -----------------------------
-  // COPY TEXT
-  // -----------------------------
+  // COPY
   const handleCopy = async () => {
     if (!data) return;
 
@@ -171,17 +233,10 @@ export default function TimelineClient({ slug }: { slug: string }) {
     }
   };
 
-  // -----------------------------
-  // SAVE CHANGES
-  // -----------------------------
+  // SAVE (no sorting → keep drag order)
   const handleSave = async () => {
     setSaving(true);
     setSaveMessage(null);
-
-    const sortedItems = [...items].sort((a, b) =>
-      (a.time || '').localeCompare(b.time || '')
-    );
-    setItems(sortedItems);
 
     const payload = {
       title: editableTitle || null,
@@ -207,12 +262,8 @@ export default function TimelineClient({ slug }: { slug: string }) {
 
       const json = await res.json();
 
-      const enrichedItems = (json.items || []).map((item: TimelineItem) => ({
-        ...item,
-        id: item.id || crypto.randomUUID(),
-      }));
-
-      setItems(enrichedItems);
+      const updatedItems = ensureItemsHaveIds(json.items || []);
+      setItems(updatedItems);
 
       setData((prev) =>
         prev
@@ -224,6 +275,9 @@ export default function TimelineClient({ slug }: { slug: string }) {
           : prev
       );
 
+      // clear draft after successful save
+      localStorage.removeItem(`timeline_draft_${slug}`);
+
       setSaveMessage('Saved');
     } catch (e: any) {
       console.error(e);
@@ -234,9 +288,8 @@ export default function TimelineClient({ slug }: { slug: string }) {
     }
   };
 
-  // -----------------------------
-  // RENDER UI
-  // -----------------------------
+  // ---------- Render ----------
+
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-50 flex justify-center items-center">
@@ -258,7 +311,6 @@ export default function TimelineClient({ slug }: { slug: string }) {
   return (
     <main className="min-h-screen bg-slate-50 flex justify-center p-6">
       <div className="w-full max-w-2xl bg-white rounded-2xl shadow-md p-6 space-y-6">
-
         {/* HEADER */}
         <header className="flex items-start justify-between gap-4">
           <div className="space-y-1">
@@ -324,15 +376,19 @@ export default function TimelineClient({ slug }: { slug: string }) {
             </button>
 
             {copyMessage && (
-              <span className="text-[10px] text-slate-500">{copyMessage}</span>
+              <span className="text-[10px] text-slate-500">
+                {copyMessage}
+              </span>
             )}
             {saveMessage && (
-              <span className="text-[10px] text-slate-500">{saveMessage}</span>
+              <span className="text-[10px] text-slate-500">
+                {saveMessage}
+              </span>
             )}
           </div>
         </header>
 
-        {/* TIMELINE LIST WITH DRAG & DROP */}
+        {/* LIST + DND */}
         {items.length === 0 ? (
           <p className="text-sm text-slate-600">
             No timeline items yet. Please ask your photographer or planner to
@@ -359,6 +415,7 @@ export default function TimelineClient({ slug }: { slug: string }) {
                       editMode={editMode}
                       handleItemChange={handleItemChange}
                       setItems={setItems}
+                      handleDelete={handleDelete}
                     />
                   ))}
                 </ol>
@@ -377,6 +434,25 @@ export default function TimelineClient({ slug }: { slug: string }) {
               </div>
             )}
           </>
+        )}
+
+        {/* UNDO SNACKBAR */}
+        {lastDeleted && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-black text-white px-4 py-2 rounded-lg text-xs shadow-lg flex items-center gap-3 z-50">
+            <span>Item deleted</span>
+            <button
+              className="underline"
+              onClick={() => {
+                setItems((prev) => [...prev, lastDeleted]);
+                setLastDeleted(null);
+                if (undoTimer) {
+                  clearTimeout(undoTimer);
+                }
+              }}
+            >
+              Undo
+            </button>
+          </div>
         )}
 
         {/* FOOTER */}
